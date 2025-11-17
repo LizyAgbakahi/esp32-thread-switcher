@@ -1,0 +1,19 @@
+# Ignore build output
+build/
+sdkconfig.old
+
+# IDF tools caches
+.espressif/
+
+# VS Code
+.vscode/
+
+# MacOS metadata
+.DS_Store
+
+# Python venv
+*.pyc
+__pycache__/
+
+# Logs
+*.log
