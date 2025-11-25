@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_timer.h"
@@ -15,6 +16,12 @@ typedef struct
     uint64_t next_release_us; // Next time this thread should run
     uint64_t last_run_us;     // Last time it actually ran
     int id;                   // Simple ID
+
+    // Stats
+    uint64_t min_delta_us;
+    uint64_t max_delta_us;
+    uint64_t sum_delta_us;
+    uint32_t run_count;
 } user_thread_t;
 
 // Forward declarations of "user thread" bodies
@@ -45,6 +52,10 @@ static void init_user_threads(void)
     g_threads[0].tcb.period_us = 500000;    // 500 ms
     g_threads[0].tcb.next_release_us = now; // ready to run immediately
     g_threads[0].tcb.last_run_us = 0;
+    g_threads[0].tcb.min_delta_us = UINT64_MAX;
+    g_threads[0].tcb.max_delta_us = 0;
+    g_threads[0].tcb.sum_delta_us = 0;
+    g_threads[0].tcb.run_count = 0;
     g_threads[0].func = user_thread_A_body;
 
     g_threads[1].tcb.name = "UB";
@@ -52,6 +63,10 @@ static void init_user_threads(void)
     g_threads[1].tcb.period_us = 500000; // 500 ms
     g_threads[1].tcb.next_release_us = now;
     g_threads[1].tcb.last_run_us = 0;
+    g_threads[1].tcb.min_delta_us = UINT64_MAX;
+    g_threads[1].tcb.max_delta_us = 0;
+    g_threads[1].tcb.sum_delta_us = 0;
+    g_threads[1].tcb.run_count = 0;
     g_threads[1].func = user_thread_B_body;
 }
 
@@ -91,6 +106,37 @@ static void scheduler_task(void *param)
                        (unsigned long long)now,
                        (unsigned long long)delta,
                        (delta == 0 ? 0.0 : (double)delta / 1000.0));
+
+                // Update stats for this user-thread (after the first run)
+                if (delta > 0)
+                {
+                    t->run_count++;
+                    t->sum_delta_us += delta;
+
+                    if (delta < t->min_delta_us)
+                    {
+                        t->min_delta_us = delta;
+                    }
+                    if (delta > t->max_delta_us)
+                    {
+                        t->max_delta_us = delta;
+                    }
+
+                    // Print a summary every 10 runs
+                    if (t->run_count % 10 == 0)
+                    {
+                        double avg_ms = (double)t->sum_delta_us /
+                                        (double)t->run_count / 1000.0;
+                        double min_ms = (double)t->min_delta_us / 1000.0;
+                        double max_ms = (double)t->max_delta_us / 1000.0;
+                        printf("[Stats %s] runs=%lu avg=%.2f ms min=%.2f ms max=%.2f ms\n",
+                               t->name,
+                               (unsigned long)t->run_count,
+                               avg_ms,
+                               min_ms,
+                               max_ms);
+                    }
+                }
 
                 t->last_run_us = now;
                 t->next_release_us = now + t->period_us;
