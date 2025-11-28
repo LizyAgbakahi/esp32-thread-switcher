@@ -40,6 +40,7 @@ typedef struct
 // Forward declarations of "user thread" bodies
 static void user_thread_A_body(user_thread_t *t);
 static void user_thread_B_body(user_thread_t *t);
+static void user_thread_C_body(user_thread_t *t); // NEW third thread
 
 // Each entry = TCB + function pointer
 typedef struct
@@ -48,8 +49,8 @@ typedef struct
     void (*func)(user_thread_t *t);
 } user_thread_entry_t;
 
-// For now, we just have 2 user-level threads
-#define NUM_USER_THREADS 2
+// 🔼 Now we have 3 user-level threads
+#define NUM_USER_THREADS 3
 static user_thread_entry_t g_threads[NUM_USER_THREADS];
 
 // -----------------------------
@@ -74,7 +75,7 @@ static void init_user_threads(void)
     g_threads[0].tcb.worst_lateness_us = 0;
     g_threads[0].func = user_thread_A_body;
 
-    // UB: longer period (500 ms)
+    // UB: medium period (500 ms)
     g_threads[1].tcb.name = "UB";
     g_threads[1].tcb.id = 1;
     g_threads[1].tcb.period_us = 500000; // 500 ms
@@ -87,6 +88,20 @@ static void init_user_threads(void)
     g_threads[1].tcb.deadline_misses = 0;
     g_threads[1].tcb.worst_lateness_us = 0;
     g_threads[1].func = user_thread_B_body;
+
+    // UC: longer period (700 ms) 🔹 NEW
+    g_threads[2].tcb.name = "UC";
+    g_threads[2].tcb.id = 2;
+    g_threads[2].tcb.period_us = 700000; // 700 ms
+    g_threads[2].tcb.next_release_us = now;
+    g_threads[2].tcb.last_run_us = 0;
+    g_threads[2].tcb.min_delta_us = UINT64_MAX;
+    g_threads[2].tcb.max_delta_us = 0;
+    g_threads[2].tcb.sum_delta_us = 0;
+    g_threads[2].tcb.run_count = 0;
+    g_threads[2].tcb.deadline_misses = 0;
+    g_threads[2].tcb.worst_lateness_us = 0;
+    g_threads[2].func = user_thread_C_body;
 }
 
 // -----------------------------
@@ -152,13 +167,14 @@ static void scheduler_task(void *param)
             user_thread_entry_t *entry = &g_threads[idx_to_run];
             user_thread_t *t = &entry->tcb;
 
+            uint64_t now2 = esp_timer_get_time();
             uint64_t delta = (t->last_run_us == 0)
                                  ? 0
-                                 : now - t->last_run_us;
+                                 : now2 - t->last_run_us;
 
             printf("[UThread %s] now=%llu us, delta=%llu us (~%.2f ms)\n",
                    t->name,
-                   (unsigned long long)now,
+                   (unsigned long long)now2,
                    (unsigned long long)delta,
                    (delta == 0 ? 0.0 : (double)delta / 1000.0));
 
@@ -216,8 +232,8 @@ static void scheduler_task(void *param)
                 }
             }
 
-            t->last_run_us = now;
-            t->next_release_us = now + t->period_us;
+            t->last_run_us = now2;
+            t->next_release_us = now2 + t->period_us;
 
             // "Run" the user-level thread body
             entry->func(t);
@@ -260,6 +276,17 @@ static void user_thread_B_body(user_thread_t *t)
         prod = (prod * i) % 100003;
     }
     printf("  -> [UThread %s] did some work (prod loop)\n", t->name);
+}
+
+static void user_thread_C_body(user_thread_t *t)
+{
+    // Simulate another kind of "work"
+    volatile int x = 0;
+    for (int i = 0; i < 1500; i++)
+    {
+        x ^= i;
+    }
+    printf("  -> [UThread %s] did some work (xor loop)\n", t->name);
 }
 
 // -----------------------------
