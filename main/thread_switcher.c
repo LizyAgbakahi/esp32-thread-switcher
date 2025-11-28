@@ -17,11 +17,15 @@ typedef struct
     uint64_t last_run_us;     // Last time it actually ran
     int id;                   // Simple ID
 
-    // Stats
+    // Timing stats (observed periods)
     uint64_t min_delta_us;
     uint64_t max_delta_us;
     uint64_t sum_delta_us;
     uint32_t run_count;
+
+    // Deadline stats
+    uint32_t deadline_misses;   // how many times we ran "late"
+    uint64_t worst_lateness_us; // largest (delta - period_us)
 } user_thread_t;
 
 // Forward declarations of "user thread" bodies
@@ -56,6 +60,8 @@ static void init_user_threads(void)
     g_threads[0].tcb.max_delta_us = 0;
     g_threads[0].tcb.sum_delta_us = 0;
     g_threads[0].tcb.run_count = 0;
+    g_threads[0].tcb.deadline_misses = 0;
+    g_threads[0].tcb.worst_lateness_us = 0;
     g_threads[0].func = user_thread_A_body;
 
     g_threads[1].tcb.name = "UB";
@@ -67,6 +73,8 @@ static void init_user_threads(void)
     g_threads[1].tcb.max_delta_us = 0;
     g_threads[1].tcb.sum_delta_us = 0;
     g_threads[1].tcb.run_count = 0;
+    g_threads[1].tcb.deadline_misses = 0;
+    g_threads[1].tcb.worst_lateness_us = 0;
     g_threads[1].func = user_thread_B_body;
 }
 
@@ -107,6 +115,24 @@ static void scheduler_task(void *param)
                        (unsigned long long)delta,
                        (delta == 0 ? 0.0 : (double)delta / 1000.0));
 
+                // Deadline check: if the observed period > desired period,
+                // we treat that as a (soft) deadline miss.
+                if (t->last_run_us != 0 && delta > t->period_us)
+                {
+                    uint64_t lateness_us = delta - t->period_us;
+                    t->deadline_misses++;
+
+                    if (lateness_us > t->worst_lateness_us)
+                    {
+                        t->worst_lateness_us = lateness_us;
+                    }
+
+                    printf("[Deadline MISS %s] lateness=%llu us (~%.2f ms)\n",
+                           t->name,
+                           (unsigned long long)lateness_us,
+                           (double)lateness_us / 1000.0);
+                }
+
                 // Update stats for this user-thread (after the first run)
                 if (delta > 0)
                 {
@@ -129,12 +155,17 @@ static void scheduler_task(void *param)
                                         (double)t->run_count / 1000.0;
                         double min_ms = (double)t->min_delta_us / 1000.0;
                         double max_ms = (double)t->max_delta_us / 1000.0;
-                        printf("[Stats %s] runs=%lu avg=%.2f ms min=%.2f ms max=%.2f ms\n",
+                        double worst_late_ms = (double)t->worst_lateness_us / 1000.0;
+
+                        printf("[Stats %s] runs=%lu avg=%.2f ms min=%.2f ms max=%.2f ms "
+                               "misses=%lu worst_late=%.2f ms\n",
                                t->name,
                                (unsigned long)t->run_count,
                                avg_ms,
                                min_ms,
-                               max_ms);
+                               max_ms,
+                               (unsigned long)t->deadline_misses,
+                               worst_late_ms);
                     }
                 }
 
