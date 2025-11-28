@@ -12,7 +12,7 @@
 #define SCHED_POLICY_EDF 1
 
 // 🔽 Change this between SCHED_POLICY_RR and SCHED_POLICY_EDF
-#define SCHED_POLICY SCHED_POLICY_EDF
+#define SCHED_POLICY SCHED_POLICY_RR
 
 // -----------------------------
 // User-level "thread" data
